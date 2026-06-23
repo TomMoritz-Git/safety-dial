@@ -13,8 +13,6 @@ Each stage skips work whose output already exists (``force=True`` to redo), so a
 run interrupted by an OOM, a gated model, or a flaky API call resumes cleanly.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 

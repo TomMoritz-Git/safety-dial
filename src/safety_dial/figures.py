@@ -14,8 +14,6 @@ plus a supplementary AUC heatmap. All read cached tables / responses under
 ``results/`` and write to ``figures/`` (Agg backend, no display).
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import matplotlib

@@ -6,8 +6,6 @@ predictor of whether the model will refuse. Here we score how well it predicts
 monitor<->action disagreements (over- and under-refusal).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import numpy as np

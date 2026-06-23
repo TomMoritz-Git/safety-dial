@@ -7,8 +7,6 @@ tool call, and the judge itself is validated against a human-labeled gold set
 before it is trusted for the full run.
 """
 
-from __future__ import annotations
-
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass

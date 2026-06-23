@@ -4,8 +4,6 @@ Pure NumPy: the GPU-side activation capture lives in :mod:`safety_dial.model`;
 here we only manipulate the resulting vectors so the math is unit-testable.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import numpy as np
@@ -112,7 +110,7 @@ def layer_sweep(
 
     For each layer the direction is fitted on the first ``n_train`` anchors per
     class and scored by Cohen's d on the remaining (held-out) anchors. Selecting
-    on a held-out split avoids cherry-picking the layer to the same data.
+    on a held-out split keeps the layer choice independent of its scoring data.
 
     Args:
         harm_by_layer: ``[n_layers, n_harm, hidden]`` harmful-anchor activations.

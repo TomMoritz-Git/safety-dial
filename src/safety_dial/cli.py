@@ -10,8 +10,6 @@ Stages mirror the pipeline and are individually resumable::
     safety-dial all        # models -> judge -> metrics -> figures
 """
 
-from __future__ import annotations
-
 import argparse
 
 from . import config

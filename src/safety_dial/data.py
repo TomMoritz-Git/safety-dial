@@ -5,8 +5,6 @@ on load so a malformed dataset fails loudly and early rather than halfway
 through a multi-hour run.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 from pathlib import Path

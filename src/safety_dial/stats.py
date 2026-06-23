@@ -4,8 +4,7 @@ All functions take and return plain floats / NumPy arrays so they can be unit
 tested without a GPU or network.
 """
 
-from __future__ import annotations
-
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -101,7 +100,7 @@ def wilson_ci(successes: int, n: int, z: float = 1.96) -> Interval:
 
 
 def bootstrap_ci(
-    func,
+    func: Callable[..., float],
     *arrays: np.ndarray,
     n_resamples: int = 2000,
     alpha: float = 0.05,

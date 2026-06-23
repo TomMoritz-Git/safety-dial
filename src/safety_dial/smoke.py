@@ -7,9 +7,9 @@ quick substring refusal heuristic so a human can eyeball that the harmful prompt
 is refused and no thinking trace leaked.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
+
+import numpy as np
 
 from . import config
 from .model import ModelRunner
@@ -65,8 +65,6 @@ def smoke_model(spec: config.ModelSpec, device: str = "cuda") -> SmokeResult:
     Returns:
         A :class:`SmokeResult` (``ok=False`` with ``error`` set on failure).
     """
-    import numpy as np
-
     runner = None
     try:
         runner = ModelRunner.load(spec, device=device)

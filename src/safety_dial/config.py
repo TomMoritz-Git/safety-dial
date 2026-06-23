@@ -5,11 +5,11 @@ data. No module-level side effects beyond defining constants (``load_env`` is
 explicit).
 """
 
-from __future__ import annotations
-
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # --- Paths -----------------------------------------------------------------
 # Repo root is two parents up from this file: <root>/src/safety_dial/config.py
@@ -50,15 +50,15 @@ class ModelSpec:
     provider: str
     params_b: float
     gated: bool = False
-    chat_template_kwargs: dict = field(default_factory=dict)
+    chat_template_kwargs: dict[str, object] = field(default_factory=dict)
     system: str | None = None
     load_in_4bit: bool = False
     attn_implementation: str = "sdpa"
     notes: str = ""
 
 
-# The four headline models (one per provider) plus the validated pilot for
-# continuity. Pascal (sm_61): all load fp16 + eager attention (see model.py).
+# Models under study, grouped by provider. Pascal (sm_61): all load fp16; the
+# attention backend is per-model (SDPA default, eager for Gemma) -- see model.py.
 MODELS: tuple[ModelSpec, ...] = (
     ModelSpec(
         key="qwen3-1.7b",
@@ -103,7 +103,7 @@ MODELS: tuple[ModelSpec, ...] = (
         hf_id="Qwen/Qwen2.5-1.5B-Instruct",
         provider="Alibaba",
         params_b=1.5,
-        notes="Validated pilot (layer 14, within-topic AUC 0.94).",
+        notes="Pilot model, kept for continuity.",
     ),
 )
 
@@ -135,8 +135,8 @@ N_LEVELS = 5  # L0 (legit) .. L4 (disallowed)
 
 
 # --- Method knobs ----------------------------------------------------------
-# Anchor split: 8 benign + 8 harmful, first half builds the direction, second
-# half scores layer separation (held out, no cherry-picking).
+# Anchor split: 8 benign + 8 harmful; the first half builds the direction and the
+# second half scores layer separation, so the layer is chosen on held-out anchors.
 ANCHOR_TRAIN_PER_CLASS = 4
 
 # Dial steering grid (natural units of the raw diff-of-means vector) and the
@@ -191,8 +191,6 @@ def load_env(dotenv_path: Path | None = None) -> None:
     Args:
         dotenv_path: Optional explicit path; defaults to ``<root>/.env``.
     """
-    from dotenv import load_dotenv
-
     load_dotenv(dotenv_path or (ROOT / ".env"), override=False)
 
 

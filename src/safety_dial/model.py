@@ -1,15 +1,13 @@
-"""GPU-side model runner: fp16/eager loading, activation capture, steered gen.
+"""GPU-side model runner: fp16 loading, activation capture, steered generation.
 
 This is the only module that holds weights. It encapsulates the Pascal-specific
-choices (fp16, eager attention) and the two hard-won details from the pilot:
+choices (fp16; SDPA attention, eager for Gemma) and two implementation details:
 
 * read activations at ``hidden_states[layer + 1]`` (output of decoder block
   ``layer``), at the **last prompt token** (batch size 1, so no padding);
 * steer by adding ``coeff * raw_direction`` to a decoder layer's residual
   output at **every** position throughout generation.
 """
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -55,8 +53,8 @@ class ModelRunner:
         self.n_layers = len(self.layers)
 
     @classmethod
-    def load(cls, spec: ModelSpec, device: str = "cuda") -> ModelRunner:
-        """Load ``spec`` in fp16 with eager attention (Pascal-safe).
+    def load(cls, spec: ModelSpec, device: str = "cuda") -> "ModelRunner":
+        """Load ``spec`` in fp16 with its configured attention backend (Pascal-safe).
 
         Args:
             spec: The model to load.

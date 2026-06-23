@@ -8,8 +8,6 @@ Inputs are tidy DataFrames so this module is testable without GPU/API:
   (real|random), refused``.
 """
 
-from __future__ import annotations
-
 import numpy as np
 import pandas as pd
 
