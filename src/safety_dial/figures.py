@@ -292,6 +292,127 @@ def calibration_gap(monitor_tbl: pd.DataFrame, path: Path) -> Path:
 
 
 # --------------------------------------------------------------------------
+# Figure 4 -- the over-/under-refusal frontier (Act III: the use)
+# --------------------------------------------------------------------------
+def calibration_frontier(pooled_intent_tbl: pd.DataFrame, path: Path) -> Path:
+    """Each model as a point on the over- vs under-refusal frontier.
+
+    Over-refusal (x) is the refusal rate on L0 *legitimate* requests; under-
+    refusal (y) is the comply rate on L4 *disallowed* requests. Both are scored
+    against the ladder's ground-truth intent (not the monitor's own threshold),
+    with Wilson 95% CIs. Models trade one error for the other: the dashed guide
+    is the equal-error diagonal.
+    """
+    _apply_style()
+    models = _models(set(pooled_intent_tbl["model"]))
+    fig, ax = plt.subplots(figsize=(6.2, 5.8))
+    lim = 0.0
+    for model in models:
+        r = pooled_intent_tbl[pooled_intent_tbl["model"] == model].iloc[0]
+        x, y = r["over_refusal"], r["under_refusal"]
+        ax.errorbar(
+            x,
+            y,
+            xerr=[[x - r["over_lo"]], [r["over_hi"] - x]],
+            yerr=[[y - r["under_lo"]], [r["under_hi"] - y]],
+            fmt="o",
+            color=MODEL_COLORS[model],
+            ecolor=MODEL_COLORS[model],
+            elinewidth=1.6,
+            capsize=3,
+            markersize=9,
+            label=model,
+        )
+        ax.annotate(
+            model,
+            (x, y),
+            textcoords="offset points",
+            xytext=(8, 5),
+            fontsize=9,
+            color="#333",
+        )
+        lim = max(lim, r["over_hi"], r["under_hi"])
+    lim = min(1.0, lim * 1.15)
+    ax.plot([0, lim], [0, lim], ls="--", color="#bbb", lw=1, zorder=0)
+    ax.annotate(
+        "equal-error",
+        (lim, lim),
+        textcoords="offset points",
+        xytext=(-4, -12),
+        ha="right",
+        fontsize=8,
+        color="#999",
+    )
+    ax.set_xlim(-0.01, lim)
+    ax.set_ylim(-0.01, lim)
+    ax.set_xlabel("over-refusal: refuse rate on L0 legitimate requests")
+    ax.set_ylabel("under-refusal: comply rate on L4 disallowed requests")
+    ax.set_title("The calibration frontier (intent-relative)")
+    ax.grid(True)
+    return _save(fig, path)
+
+
+# --------------------------------------------------------------------------
+# Figure 5 -- where the single-direction thesis breaks (Act II: the limit)
+# --------------------------------------------------------------------------
+def misinformation_breakdown(
+    graded: pd.DataFrame, monitor_tbl: pd.DataFrame, path: Path, healthy: str = "privacy"
+) -> Path:
+    """Contrast a healthy safeguard with misinformation: ramp + per-cell AUC.
+
+    Left: all-model-average refusal ramp (Wilson band) climbs monotonically for
+    the healthy safeguard but is flat/non-monotone for misinformation. Right:
+    within-topic AUC per (model, safeguard) — misinformation cells sit far below
+    the rest, where they are reportable at all.
+    """
+    _apply_style()
+    fig, (axl, axr) = plt.subplots(1, 2, figsize=(11.5, 4.6))
+    levels = sorted(graded["level"].unique())
+    sg_color = {healthy: _OKABE["green"], "misinformation": _OKABE["vermillion"]}
+
+    for sg in (healthy, "misinformation"):
+        pts, los, his = [], [], []
+        for lv in levels:
+            sub = graded[(graded["safeguard"] == sg) & (graded["level"] == lv)]
+            ci = wilson_ci(int(sub["refused"].sum()), len(sub))
+            pts.append(ci.point)
+            los.append(ci.lo)
+            his.append(ci.hi)
+        axl.plot(levels, pts, "o-", color=sg_color[sg], label=sg)
+        axl.fill_between(levels, los, his, color=sg_color[sg], alpha=0.12)
+    axl.set_ylim(0, 1)
+    axl.set_xticks(levels, [f"L{lv}" for lv in levels])
+    axl.set_xlabel("severity level (L0 legitimate $\\rightarrow$ L4 disallowed)")
+    axl.set_ylabel("refusal rate (all-model avg)")
+    axl.set_title("Behavior ramp: healthy vs. broken safeguard")
+    axl.grid(axis="y")
+    axl.legend(loc="upper left")
+
+    # Right: within-topic AUC per safeguard, one marker per model.
+    sgs = [s for s in config.SAFEGUARDS if s in set(monitor_tbl["safeguard"])]
+    for xi, sg in enumerate(sgs):
+        cells = monitor_tbl[monitor_tbl["safeguard"] == sg]
+        for _, r in cells.iterrows():
+            if np.isnan(r["within_auc"]):
+                continue
+            jitter = (hash(r["model"]) % 5 - 2) * 0.04
+            axr.plot(
+                xi + jitter,
+                r["within_auc"],
+                "o",
+                color=MODEL_COLORS.get(r["model"], "#666"),
+                markersize=7,
+            )
+    axr.axhline(0.5, color="#999", lw=1, ls="--")
+    axr.set_xticks(range(len(sgs)), sgs, rotation=20, ha="right")
+    axr.set_ylim(0.45, 1.02)
+    axr.set_ylabel("within-topic AUC")
+    axr.set_title("Read quality by safeguard (0.5 = chance)")
+    axr.grid(axis="y")
+    return _save(fig, path)
+
+
+# --------------------------------------------------------------------------
 # Supplementary -- per-model AUC forest plot and per-cell heatmap
 # --------------------------------------------------------------------------
 def auc_forest(pooled_tbl: pd.DataFrame, path: Path) -> Path:
@@ -332,6 +453,59 @@ def auc_forest(pooled_tbl: pd.DataFrame, path: Path) -> Path:
     return _save(fig, path)
 
 
+def anchor_robustness(robust_tbl: pd.DataFrame, nsweep_tbl: pd.DataFrame, path: Path) -> Path:
+    """Supplementary: the read does not hinge on the 8 deployed anchors.
+
+    Left: within-topic AUC vs. anchors-per-class N (4..32); the deployed N=8 is
+    marked, and every curve is flat — N=8 is on the plateau. Right: cosine
+    similarity between each bootstrap-resampled pool direction and the deployed
+    8-anchor direction (point = full-pool vs. deployed, bar = resample mean).
+    """
+    _apply_style()
+    models = _models(set(robust_tbl["model"]))
+    fig, (axl, axr) = plt.subplots(1, 2, figsize=(11.5, 4.6))
+
+    for model in models:
+        sub = nsweep_tbl[nsweep_tbl["model"] == model].sort_values("n_per_class")
+        axl.plot(
+            sub["n_per_class"],
+            sub["mean_auc"],
+            "o-",
+            color=MODEL_COLORS[model],
+            label=model,
+            markersize=5,
+        )
+    axl.axvline(8, color="#333", ls="--", lw=1.1)
+    axl.annotate(
+        "deployed N=8",
+        (8, axl.get_ylim()[0]),
+        xytext=(6, 6),
+        textcoords="offset points",
+        fontsize=8,
+        color="#333",
+    )
+    axl.set_xscale("log", base=2)
+    axl.set_xticks([4, 8, 16, 32], ["4", "8", "16", "32"])
+    axl.set_xlabel("anchors per class (N)")
+    axl.set_ylabel("within-topic AUC (resample mean)")
+    axl.set_title("Read is flat in anchor count")
+    axl.grid(True)
+    axl.legend(loc="lower right", ncol=1)
+
+    y = np.arange(len(models))
+    for yi, model in enumerate(models):
+        r = robust_tbl[robust_tbl["model"] == model].iloc[0]
+        axr.barh(yi, r["cos_resampled_mean"], color=MODEL_COLORS[model], alpha=0.5, height=0.6)
+        axr.plot(r["cos_pool_deployed"], yi, "D", color=MODEL_COLORS[model], markersize=8)
+    axr.axvline(1.0, color="#999", lw=1, ls="--")
+    axr.set_yticks(y, models)
+    axr.set_xlim(0.9, 1.005)
+    axr.set_xlabel("cosine to deployed 8-anchor direction")
+    axr.set_title("Direction is stable (bar = resample mean, ◆ = full pool)")
+    axr.grid(axis="x")
+    return _save(fig, path)
+
+
 def heatmap(monitor_tbl: pd.DataFrame, path: Path) -> Path:
     """Supplementary: within-topic AUC for every (safeguard x model) cell."""
     _apply_style()
@@ -368,6 +542,7 @@ def make_all() -> list[Path]:
     config.FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     monitor_tbl = _load("monitor")
     pooled_tbl = _load("monitor_pooled")
+    pooled_intent_tbl = _load("intent_calibration_pooled")
     dial_tbl = _load("dial")
     graded = _graded()
     return [
@@ -376,6 +551,17 @@ def make_all() -> list[Path]:
         ),
         graded_ramp(graded, config.FIGURES_DIR / "fig2_graded_ramp.png"),
         calibration_gap(monitor_tbl, config.FIGURES_DIR / "fig3_calibration_gap.png"),
+        calibration_frontier(
+            pooled_intent_tbl, config.FIGURES_DIR / "fig4_calibration_frontier.png"
+        ),
+        misinformation_breakdown(
+            graded, monitor_tbl, config.FIGURES_DIR / "fig5_misinfo_breakdown.png"
+        ),
         auc_forest(pooled_tbl, config.FIGURES_DIR / "supp_auc_forest.png"),
         heatmap(monitor_tbl, config.FIGURES_DIR / "supp_auc_heatmap.png"),
+        anchor_robustness(
+            _load("robustness"),
+            _load("robustness_nsweep"),
+            config.FIGURES_DIR / "supp_anchor_robustness.png",
+        ),
     ]

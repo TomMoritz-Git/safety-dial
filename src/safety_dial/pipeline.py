@@ -223,6 +223,11 @@ def judge_stage(force: bool = False, gold_threshold: float | None = None) -> pd.
                 "n": report.n,
                 "agreement": report.agreement,
                 "passed": report.passed,
+                "recall": {lbl: report.recall(lbl) for lbl in config.JUDGE_LABELS},
+                "confusion": [
+                    {"gold": g, "judge": j, "count": c}
+                    for (g, j), c in sorted(report.confusion.items())
+                ],
                 "disagreements": [
                     {"id": i, "gold": g, "judge": j} for i, g, j in report.disagreements
                 ],
@@ -277,6 +282,8 @@ def metrics_stage() -> dict[str, pd.DataFrame]:
     tables = {
         "monitor": metrics.monitor_table(graded),
         "monitor_pooled": metrics.pooled_monitor_table(graded),
+        "intent_calibration": metrics.intent_calibration(graded),
+        "intent_calibration_pooled": metrics.pooled_intent_calibration(graded),
         "ramp": metrics.ramp_table(graded),
         "dial": metrics.dial_table(dial),
     }

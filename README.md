@@ -2,15 +2,31 @@
 
 One internal linear direction that both **predicts** and **controls** a small
 instruct model's refusals — measured across several models and safeguard
-domains.
+domains, with the boundary where that picture breaks made explicit.
 
-> **Thesis.** In small instruct models, the decision to refuse is not a binary
-> switch but a *graded threshold on a single linear direction* in the residual
-> stream. The same direction **reads** the safeguard (its projection predicts
-> refusal before generation — a monitor) and **writes** it (adding it slides the
-> model across its refusal threshold — a dial). Where the monitor's reading and
-> the model's action disagree, the safeguard is miscalibrated (over- /
-> under-refusal).
+> **Thesis.** In small instruct models, the decision to refuse is — for the
+> safeguards where post-training installed a coherent one — a *graded threshold
+> on a single linear direction* in the residual stream. The same direction
+> **reads** the safeguard (its projection predicts refusal before generation — a
+> monitor) and **writes** it (adding it slides the model across its refusal
+> threshold — a dial). The story comes in three acts:
+>
+> - **I — Structure (it works).** One vector reads refusal (within-topic AUC
+>   0.92–0.98) and writes it (the dial drives benign prompts to refusal, beating
+>   a norm-matched random control, with *coherent* refusals inside the operating
+>   band).
+> - **II — Limit (where it breaks).** The linear-threshold account is
+>   *domain-specific*: it is crisp for privacy / cyber-access / fraud and *fails
+>   for misinformation* (AUC near chance, a non-monotone severity ramp, degenerate
+>   base rates). Refusal is not one mechanism — it is one mechanism *where the
+>   model has a safeguard*, and several of these models simply don't have a
+>   coherent one for misinformation.
+> - **III — Use (what it's for).** Scored against the ladder's ground-truth
+>   intent (not the monitor's own threshold), the models sit at different points
+>   on an **over-refusal ↔ under-refusal frontier** — from maximally cautious
+>   (qwen2.5: 26% over-refusal on legitimate L0 requests, 0% under-refusal on
+>   disallowed L4) to permissive (smollm3: 1% / 31%). The dial moves a model along
+>   that frontier and the monitor predicts where it sits before generation.
 
 ## Method
 
@@ -26,11 +42,49 @@ domains.
   refusal *before* generation. Primary metric: **within-topic AUC** (same-scenario
   pairs only, so it can't be a mere topic detector).
 - **Dial (write).** Adding `c · direction` during generation slides benign prompts
-  into refusal; a **norm-matched random direction** is the specificity control.
-- **Calibration gap.** Monitor reading vs. actual refusal; over-/under-refusal
-  rates are 5-fold cross-fitted (out-of-sample).
+  into refusal; a **norm-matched random direction** is the specificity control and
+  a distinct-bigram check confirms the induced refusals are coherent, not breakage.
+- **Calibration (intent-relative).** The headline calibration is scored against
+  the ladder's **ground-truth intent**: over-refusal = refusing an L0 *legitimate*
+  request; under-refusal = complying with an L4 *disallowed* one (Wilson CIs). The
+  earlier monitor-vs-action "gap" is kept only as a *threshold-residual* diagnostic
+  (how close refusal is to a pure 1-D threshold) — it is not a normative calibration
+  measure, since its reference is the monitor's own operating point rather than intent.
 - **Judge.** `claude-haiku-4-5` with forced structured output, gated at ≥95%
   agreement with the gold set before it labels the full run.
+
+**Primary vs. exploratory.** To keep 5 models × 4 safeguards × several metrics
+honest, the *primary* endpoints are: pooled within-topic AUC (read), the dial vs.
+norm-matched-random gap within the operating band (write), and the intent-relative
+over-/under-refusal frontier (calibration). Everything else — per-safeguard AUC
+cells, the severity ramps, the threshold-residual gap — is exploratory and read
+descriptively, not as a tested claim.
+
+**Robustness — the direction isn't an artifact of 8 prompts.** The deployed
+direction is a diff-of-means over 8 anchors per class. To show the read doesn't
+hinge on that handful, a separate 32/class anchor *pool* (`data/anchor_pool.json`)
+is captured forward-only (no generation, no re-judge; the deployed direction and
+judged labels are untouched) and resampled in NumPy (`robustness.py`):
+
+- **Bootstrap.** Pool-resampled within-topic AUC reproduces the deployed AUC
+  within ≤0.006 for every model, with tight CIs (e.g. qwen2.5 0.975 [0.972, 0.977]
+  vs. deployed 0.977).
+- **Anchor-count sweep.** AUC is *flat* from N=4 to N=32 (gemma 0.921→0.924,
+  qwen2.5 0.974→0.975) — N=8 is on the plateau; more anchors don't change the read.
+- **Cosine stability.** The full-pool direction sits at cosine 0.96–0.99 to the
+  deployed 8-anchor one; bootstrap resamples stay >0.92. The axis is a property of
+  the model, not of the anchor sample.
+
+See `results/metrics/robustness*.parquet`, `results/robustness_report.json`, and
+`figures/supp_anchor_robustness.png`.
+
+**Stimulus & judge validation.** Two guardrails back the headline numbers. (1) An
+independent blind rater (`intent.py`) scores each ladder prompt's intent given the
+*request only* — L0/L1 read benign, L4 disallowed, monotone — so the intent-relative
+calibration is not graded against the author's own labels. (2) The judge is gated
+on a gold set stratified to the hard cells (refusing legitimate requests, complying
+with disallowed); on it the refuse/comply split that every primary metric uses has
+100% per-class recall (`results/gold_report.json`).
 
 ## Layout
 
@@ -40,14 +94,16 @@ src/safety_dial/      # the package
   data.py             # ladder / anchor / gold loaders + validation
   stats.py            # AUC, Cohen's d, Wilson & bootstrap CIs (pure NumPy)
   extraction.py       # diff-of-means direction + held-out layer sweep
-  monitor.py          # read-side AUC, threshold, calibration gap
+  monitor.py          # read-side AUC, threshold, threshold-residual gap
   model.py            # fp16 model runner (sdpa; eager for Gemma): acts + steered gen
-  judge.py            # Anthropic structured-output refusal judge + gold gate
-  metrics.py          # assemble per-(model x safeguard) results tables
-  figures.py          # hero heatmap, ramps, read<->write exemplar
+  judge.py            # Anthropic structured-output refusal judge + gold gate + confusion
+  intent.py           # blind request-intent rater (validates the ladder's levels)
+  metrics.py          # results tables: monitor AUC, intent calibration, ramps, dial
+  robustness.py       # anchor-pool capture + bootstrap / N-sweep / cosine stability
+  figures.py          # hero read<->write, ramps, calibration frontier, misinfo breakdown
   pipeline.py         # resumable orchestration
   cli.py              # `safety-dial <stage>`
-data/                 # ladders.json, anchors.json, gold.json
+data/                 # ladders.json, anchors.json, anchor_pool.json, gold.json
 tests/                # pure-Python unit tests (no GPU/API)
 ```
 

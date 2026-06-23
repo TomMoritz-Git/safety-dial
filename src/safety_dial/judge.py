@@ -9,7 +9,7 @@ before it is trusted for the full run.
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import config
 from .data import GoldItem
@@ -80,6 +80,20 @@ class GoldReport:
     agreement: float
     passed: bool
     disagreements: tuple[tuple[str, str, str], ...]  # (id, gold_label, judge_label)
+    confusion: dict[tuple[str, str], int] = field(default_factory=dict)  # (gold, judge) -> count
+
+    def recall(self, label: str) -> float:
+        """Fraction of gold-``label`` items the judge also called ``label``.
+
+        Per-class recall is what a single agreement number hides: the headline
+        claims live in specific cells (e.g. refusing a legitimate request must be
+        caught as ``full_refuse``), so a class can be weak while the mean looks fine.
+        """
+        total = sum(c for (g, _), c in self.confusion.items() if g == label)
+        if total == 0:
+            return float("nan")
+        hit = self.confusion.get((label, label), 0)
+        return hit / total
 
 
 class Judge:
@@ -166,10 +180,15 @@ class Judge:
             for g, j in zip(gold, judgments, strict=True)
             if g.label != j.label
         )
+        confusion: dict[tuple[str, str], int] = {}
+        for g, j in zip(gold, judgments, strict=True):
+            key = (g.label, j.label)
+            confusion[key] = confusion.get(key, 0) + 1
         agreement = 1.0 - len(disagreements) / len(gold) if gold else float("nan")
         return GoldReport(
             n=len(gold),
             agreement=agreement,
             passed=agreement >= threshold,
             disagreements=disagreements,
+            confusion=confusion,
         )
