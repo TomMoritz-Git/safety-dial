@@ -58,7 +58,12 @@ honest, the *primary* endpoints are: pooled within-topic AUC (read), the dial vs
 norm-matched-random gap within the operating band (write), and the intent-relative
 over-/under-refusal frontier (calibration). Everything else — per-safeguard AUC
 cells, the severity ramps, the threshold-residual gap — is exploratory and read
-descriptively, not as a tested claim.
+descriptively, not as a tested claim. The judge's three-way label is kept (not
+just the refuse/comply binarization): the `partial` mass (`label_mix`,
+`figures/supp_label_composition.png`) sits at the *legitimate* L0/L1 levels — these
+small models half-answer benign asks far more than they refuse them — rather than
+at the mid-ladder boundary, and thins to nothing by L3/L4. Some of that L0 partial
+is plausibly the 64-token generation cap (`MAX_NEW_TOKENS`) truncating real help.
 
 **Robustness — the direction isn't an artifact of 8 prompts.** The deployed
 direction is a diff-of-means over 8 anchors per class. To show the read doesn't
@@ -98,7 +103,7 @@ src/safety_dial/      # the package
   model.py            # fp16 model runner (sdpa; eager for Gemma): acts + steered gen
   judge.py            # Anthropic structured-output refusal judge + gold gate + confusion
   intent.py           # blind request-intent rater (validates the ladder's levels)
-  metrics.py          # results tables: monitor AUC, intent calibration, ramps, dial
+  metrics.py          # results tables: monitor AUC, intent calibration, label mix, ramps, dial
   robustness.py       # anchor-pool capture + bootstrap / N-sweep / cosine stability
   figures.py          # hero read<->write, ramps, calibration frontier, misinfo breakdown
   pipeline.py         # resumable orchestration

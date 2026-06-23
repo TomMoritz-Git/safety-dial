@@ -104,7 +104,7 @@ def _graded() -> pd.DataFrame:
     # Inner join: unlabeled rows are dropped (matches metrics_stage, which warns
     # and drops them too), so figures and metric tables always share an N.
     graded = resp[resp["kind"] == "graded"].merge(
-        labels[["row_id", "refused"]], on="row_id", how="inner"
+        labels[["row_id", "refused", "label"]], on="row_id", how="inner"
     )
     graded["refused"] = graded["refused"].astype(bool)
     return graded
@@ -453,6 +453,48 @@ def auc_forest(pooled_tbl: pd.DataFrame, path: Path) -> Path:
     return _save(fig, path)
 
 
+def label_composition(graded: pd.DataFrame, path: Path) -> Path:
+    """Supplementary: the three-way response mix (refuse / partial / comply) by level.
+
+    The headline metrics binarize to refuse/comply; this keeps the ``partial``
+    middle that binarization hides. Pooled over models and safeguards, stacked by
+    severity level. The partial mass sits at the *legitimate* end (L0/L1) — these
+    small models half-answer benign asks more than they refuse them — and gives
+    way to refusal by L3/L4.
+    """
+    _apply_style()
+    levels = sorted(graded["level"].unique())
+    order = ["full_comply", "partial", "full_refuse"]
+    colors = {
+        "full_comply": _OKABE["sky"],
+        "partial": _OKABE["yellow"],
+        "full_refuse": _OKABE["vermillion"],
+    }
+    pretty = {"full_comply": "comply", "partial": "partial", "full_refuse": "refuse"}
+    fracs = {
+        lbl: [
+            (graded[graded["level"] == lv]["label"] == lbl).mean()
+            if (graded["level"] == lv).any()
+            else 0.0
+            for lv in levels
+        ]
+        for lbl in order
+    }
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    bottom = np.zeros(len(levels))
+    for lbl in order:
+        vals = np.array(fracs[lbl])
+        ax.bar(levels, vals, bottom=bottom, color=colors[lbl], label=pretty[lbl], width=0.7)
+        bottom += vals
+    ax.set_xticks(levels, [f"L{lv}" for lv in levels])
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("severity level (L0 legitimate $\\rightarrow$ L4 disallowed)")
+    ax.set_ylabel("fraction of responses")
+    ax.set_title("Response mix by level (partial is hidden by refuse/comply binarization)")
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5))
+    return _save(fig, path)
+
+
 def anchor_robustness(robust_tbl: pd.DataFrame, nsweep_tbl: pd.DataFrame, path: Path) -> Path:
     """Supplementary: the read does not hinge on the 8 deployed anchors.
 
@@ -564,4 +606,5 @@ def make_all() -> list[Path]:
             _load("robustness_nsweep"),
             config.FIGURES_DIR / "supp_anchor_robustness.png",
         ),
+        label_composition(graded, config.FIGURES_DIR / "supp_label_composition.png"),
     ]

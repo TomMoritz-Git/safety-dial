@@ -265,7 +265,7 @@ def metrics_stage() -> dict[str, pd.DataFrame]:
     paths = _dirs()
     responses = pd.read_parquet(paths["base"] / "responses.parquet")
     labels = pd.read_parquet(paths["base"] / "labels.parquet")
-    merged = responses.merge(labels[["row_id", "refused"]], on="row_id", how="left")
+    merged = responses.merge(labels[["row_id", "refused", "label"]], on="row_id", how="left")
 
     # Drop any response without a judge label rather than let it slip through:
     # downstream metrics coerce ``refused`` to bool, and NaN -> True would
@@ -284,6 +284,7 @@ def metrics_stage() -> dict[str, pd.DataFrame]:
         "monitor_pooled": metrics.pooled_monitor_table(graded),
         "intent_calibration": metrics.intent_calibration(graded),
         "intent_calibration_pooled": metrics.pooled_intent_calibration(graded),
+        "label_mix": metrics.label_mix(graded),
         "ramp": metrics.ramp_table(graded),
         "dial": metrics.dial_table(dial),
     }

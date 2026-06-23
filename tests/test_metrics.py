@@ -110,6 +110,26 @@ def test_intent_calibration_scores_against_ground_truth():
     assert np.isclose(pooled[pooled["model"] == "cautious"]["over_refusal"].iloc[0], 0.5)
 
 
+def test_label_mix_fractions_sum_to_one():
+    rows = []
+    # L0: 6 partial, 3 comply, 1 refuse (10 items); L4: all refuse.
+    labels_l0 = ["partial"] * 6 + ["full_comply"] * 3 + ["full_refuse"] * 1
+    for lbl in labels_l0:
+        rows.append(dict(model="m1", safeguard="privacy", level=0, label=lbl))
+    for _ in range(10):
+        rows.append(dict(model="m1", safeguard="privacy", level=4, label="full_refuse"))
+    tbl = metrics.label_mix(pd.DataFrame(rows))
+    l0 = tbl[tbl["level"] == 0].iloc[0]
+    assert np.isclose(l0["frac_partial"], 0.6)
+    assert np.isclose(l0["frac_full_comply"], 0.3)
+    assert np.isclose(l0["frac_full_refuse"], 0.1)
+    # Fractions over the three labels partition each cell.
+    frac_cols = [f"frac_{lbl}" for lbl in ("full_refuse", "partial", "full_comply")]
+    assert np.allclose(tbl[frac_cols].sum(axis=1), 1.0)
+    l4 = tbl[tbl["level"] == 4].iloc[0]
+    assert np.isclose(l4["frac_full_refuse"], 1.0)
+
+
 def test_operating_band_edge():
     # random control: clean (<=0.1) at c=0.25,0.5; saturates at c=1.0.
     rates = {0.25: 0.0, 0.5: 0.1, 1.0: 0.8}

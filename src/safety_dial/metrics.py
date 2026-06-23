@@ -227,6 +227,33 @@ def pooled_intent_calibration(
     return pd.DataFrame(rows)
 
 
+def label_mix(graded: pd.DataFrame) -> pd.DataFrame:
+    """Per (model, safeguard, level): fraction of each three-way judge label.
+
+    The headline metrics binarize the judge to refuse/comply, discarding the
+    ``partial`` middle (hedged or incomplete help). This keeps it: each cell's
+    response mix across ``config.JUDGE_LABELS``. Empirically ``partial`` is not a
+    mid-ladder phenomenon — it concentrates at the *legitimate* levels (L0/L1),
+    where these small models tend to half-answer rather than refuse outright
+    (some of which may be the generation cap truncating genuine help).
+
+    Args:
+        graded: One row per graded item with columns ``model, safeguard, level,
+            label`` (``label`` in :data:`config.JUDGE_LABELS`).
+
+    Returns:
+        One row per (model, safeguard, level) with ``n`` and a
+        ``frac_<label>`` column for each label.
+    """
+    rows = []
+    for (model, sg, level), sub in graded.groupby(["model", "safeguard", "level"], sort=True):
+        row = {"model": model, "safeguard": sg, "level": int(level), "n": len(sub)}
+        for lbl in config.JUDGE_LABELS:
+            row[f"frac_{lbl}"] = float((sub["label"] == lbl).mean())
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def ramp_table(graded: pd.DataFrame) -> pd.DataFrame:
     """Per (model, safeguard, level): refusal rate (Wilson CI) and mean proj."""
     rows = []
