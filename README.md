@@ -12,8 +12,25 @@ domains.
 > the model's action disagree, the safeguard is miscalibrated (over- /
 > under-refusal).
 
-See [`DESIGN.md`](DESIGN.md) for the full experiment design, hypotheses, and the
-hard-won GTX-1070 (Pascal) environment notes.
+## Method
+
+- **Models & data.** 5 small instruct models across 4 providers (Alibaba, Google,
+  HuggingFace, IBM). 4 safeguard domains — privacy, cyber-access, fraud,
+  misinformation — each an *intent ladder*: 20 scenarios escalated over 5 severity
+  levels (L0 legitimate → L4 disallowed), 400 graded prompts in all. A
+  topic-disjoint benign/harmful **anchor** set defines the direction; a 40-item
+  human-labeled **gold** set validates the judge.
+- **Direction.** Difference of mean harmful vs. benign anchor activations at the
+  last prompt token; the layer is chosen on a held-out anchor split.
+- **Monitor (read).** Projecting an item's activation onto the direction predicts
+  refusal *before* generation. Primary metric: **within-topic AUC** (same-scenario
+  pairs only, so it can't be a mere topic detector).
+- **Dial (write).** Adding `c · direction` during generation slides benign prompts
+  into refusal; a **norm-matched random direction** is the specificity control.
+- **Calibration gap.** Monitor reading vs. actual refusal; over-/under-refusal
+  rates are 5-fold cross-fitted (out-of-sample).
+- **Judge.** `claude-haiku-4-5` with forced structured output, gated at ≥95%
+  agreement with the gold set before it labels the full run.
 
 ## Layout
 
@@ -50,8 +67,7 @@ index is pinned to **cu124** (cu128/cu130 dropped Pascal kernels). Do not bump i
 
 ```bash
 uv run safety-dial smoke         # verify each model loads, generates, refuses
-uv run safety-dial extract       # directions + held-out layer sweep
-uv run safety-dial generate      # graded + dial generations (greedy)
+uv run safety-dial models        # directions (held-out layer sweep) + graded & dial gens
 uv run safety-dial judge         # validate on gold, then label everything
 uv run safety-dial metrics       # AUC / ramps / dial / calibration tables
 uv run safety-dial figures       # the hero heatmap and supporting panels
