@@ -1,0 +1,91 @@
+import numpy as np
+import pandas as pd
+
+from safety_dial import metrics
+from safety_dial.extraction import random_matched
+
+
+def _graded():
+    # Two models x two safeguards; within each scenario the refused item projects
+    # higher, so within-topic AUC should be ~1 with very different baselines.
+    rows = []
+    for model in ("m1", "m2"):
+        shift = 0.0 if model == "m1" else 50.0
+        for sg in ("privacy", "fraud"):
+            base = 0.0 if sg == "privacy" else 20.0
+            for sc in range(5):
+                for level in range(5):
+                    refused = level >= 3
+                    proj = base + shift + level + (2.0 if refused else 0.0)
+                    rows.append(
+                        dict(
+                            model=model,
+                            safeguard=sg,
+                            scenario_id=f"{sg}_{sc}",
+                            level=level,
+                            projection=proj,
+                            refused=refused,
+                        )
+                    )
+    return pd.DataFrame(rows)
+
+
+def test_random_matched_preserves_norm_and_is_deterministic():
+    ref = np.array([3.0, 4.0, 0.0, 12.0])
+    r = random_matched(ref, seed=1)
+    assert np.isclose(np.linalg.norm(r), np.linalg.norm(ref))
+    assert np.allclose(r, random_matched(ref, seed=1))
+    assert not np.allclose(r, random_matched(ref, seed=2))
+
+
+def test_monitor_table_high_within_auc():
+    tbl = metrics.monitor_table(_graded(), n_resamples=200)
+    assert set(tbl["model"]) == {"m1", "m2"}
+    assert (tbl["within_auc"] > 0.9).all()
+    assert (tbl["within_lo"] <= tbl["within_auc"]).all()
+    assert (tbl["within_auc"] <= tbl["within_hi"]).all()
+    assert (tbl["n"] == 25).all()
+
+
+def test_pooled_monitor_table_has_ci_bracketing_point():
+    tbl = metrics.pooled_monitor_table(_graded(), n_resamples=200)
+    assert set(tbl["model"]) == {"m1", "m2"}
+    assert (tbl["within_auc"] > 0.9).all()
+    assert (tbl["within_lo"] <= tbl["within_auc"]).all()
+    assert (tbl["within_auc"] <= tbl["within_hi"]).all()
+    assert (tbl["n"] == 50).all()  # 2 safeguards x 5 scenarios x 5 levels
+
+
+def test_ramp_table_is_monotone_in_level():
+    tbl = metrics.ramp_table(_graded())
+    cell = tbl[(tbl["model"] == "m1") & (tbl["safeguard"] == "privacy")].sort_values("level")
+    assert list(cell["level"]) == [0, 1, 2, 3, 4]
+    assert cell["refuse_rate"].iloc[0] == 0.0
+    assert cell["refuse_rate"].iloc[-1] == 1.0
+
+
+def test_dial_table_and_gap():
+    rows = []
+    for c in (0.0, 0.5, 1.0):
+        for control in ("real", "random"):
+            rate_true = {0.0: 0, 0.5: 6, 1.0: 10}[c] if control == "real" else 0
+            for i in range(10):
+                rows.append(dict(model="m1", coeff=c, control=control, refused=i < rate_true))
+    dial = pd.DataFrame(rows)
+    tbl = metrics.dial_table(dial)
+    gap = metrics.dial_gap(tbl)
+    top = gap[gap["coeff"] == 1.0].iloc[0]
+    assert np.isclose(top["gap"], 1.0)  # real 100% - random 0%
+    assert (gap["coeff"] > 0).all()  # the dead c=0 baseline is dropped
+
+
+def test_operating_band_edge():
+    # random control: clean (<=0.1) at c=0.25,0.5; saturates at c=1.0.
+    rates = {0.25: 0.0, 0.5: 0.1, 1.0: 0.8}
+    rows = []
+    for c, rr in rates.items():
+        for i in range(10):
+            rows.append(dict(model="m1", coeff=c, control="random", refused=i < rr * 10))
+    tbl = metrics.dial_table(pd.DataFrame(rows))
+    band = metrics.operating_band(tbl, spec_threshold=0.1)
+    assert float(band["band_edge"].iloc[0]) == 0.5
