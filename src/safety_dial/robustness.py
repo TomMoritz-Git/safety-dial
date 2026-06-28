@@ -79,6 +79,61 @@ def capture_model(spec, pool, ladders, refused_by_uid: dict[str, bool]) -> Path:
     return out
 
 
+def capture_benign_projections(specs=None) -> Path:
+    """Project the dial's benign prompts onto each model's refusal direction.
+
+    The hero figure places *steered* benign prompts on the same read axis as the
+    natural graded prompts: a prompt's baseline projection ``u0`` plus the dial's
+    displacement ``coeff * ||raw||`` is exactly its read-layer position under
+    steering (the steer hook adds ``coeff * raw`` at the read layer). This forward
+    pass supplies the ``u0`` and ``||raw||`` per model. Forward-only; the deployed
+    direction and judged labels are untouched.
+
+    Resumable and append-only: models already present are skipped, so a model that
+    OOMs mid-run can be re-captured alone in a fresh process. Writes
+    ``results/metrics/benign_proj.parquet``.
+    """
+    from .model import ModelRunner
+
+    out = config.RESULTS_DIR / "metrics" / "benign_proj.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cols = ["model", "prompt", "u0", "rawnorm"]
+    existing = pd.read_parquet(out) if out.exists() else pd.DataFrame(columns=cols)
+    have = set(existing["model"])
+    want = {s.key for s in (specs or config.MODELS)}
+
+    rows = existing.to_dict("records")
+    for spec in config.MODELS:
+        if spec.key not in want or spec.key in have:
+            continue
+        npz = config.RESULTS_DIR / "directions" / f"{spec.key}.npz"
+        if not npz.exists():
+            continue
+        d = np.load(npz)
+        unit_dir, b_mean, layer = d["unit"], d["benign_mean"], int(d["layer"])
+        rawnorm = float(np.linalg.norm(d["raw"]))
+        try:
+            runner = ModelRunner.load(spec)
+        except Exception as exc:  # noqa: BLE001 - log and continue; re-run fills gaps
+            print(f"[{spec.key}] benign capture skipped: {type(exc).__name__}", flush=True)
+            continue
+        try:
+            for prompt in config.DIAL_BENIGN:
+                a = runner.activations(prompt)[layer]
+                rows.append(
+                    {
+                        "model": spec.key,
+                        "prompt": prompt,
+                        "u0": float((a - b_mean) @ unit_dir),
+                        "rawnorm": rawnorm,
+                    }
+                )
+        finally:
+            runner.unload()
+    pd.DataFrame(rows).to_parquet(out, index=False)
+    return out
+
+
 # --------------------------------------------------------------------------
 # Analysis (pure NumPy).
 # --------------------------------------------------------------------------

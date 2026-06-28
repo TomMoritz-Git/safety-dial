@@ -110,6 +110,18 @@ def _graded() -> pd.DataFrame:
     return graded
 
 
+def _dial_real() -> pd.DataFrame:
+    """Real-control dial rows (per benign prompt and coeff) with refusal labels."""
+    resp = pd.read_parquet(config.RESULTS_DIR / "responses.parquet")
+    labels = pd.read_parquet(config.RESULTS_DIR / "labels.parquet")
+    dial = resp[resp["kind"] == "dial"].merge(
+        labels[["row_id", "refused"]], on="row_id", how="inner"
+    )
+    real = dial[dial["control"] == "real"].copy()
+    real["refused"] = real["refused"].astype(bool)
+    return real[["model", "coeff", "prompt", "refused"]]
+
+
 # --------------------------------------------------------------------------
 # Figure 1 -- hero: left READ separation | right WRITE dial
 # --------------------------------------------------------------------------
@@ -144,10 +156,9 @@ def hero_read_write(
         color="#333",
         va="top",
     )
-    lo, hi = pooled_tbl["within_auc"].min(), pooled_tbl["within_auc"].max()
-    axl.set_xlabel("projection on refusal axis (within-topic, $z$)")
+    axl.set_xlabel("projection on the refusal direction")
     axl.set_ylabel("density")
-    axl.set_title(f"Reading refusal (within-topic AUC {lo:.2f}–{hi:.2f})")
+    axl.set_title("Reading refusal")
     axl.grid(axis="y")
     axl.legend(loc="upper right")
 
@@ -167,7 +178,16 @@ def hero_read_write(
     for model in models:
         sub = dial_tbl[dial_tbl["model"] == model].sort_values("coeff")
         real = sub[sub["control"] == "real"]
-        axr.plot(real["coeff"], real["refuse_rate"], "o-", color=MODEL_COLORS[model], label=model)
+        axr.plot(
+            real["coeff"],
+            real["refuse_rate"],
+            "o-",
+            color=MODEL_COLORS[model],
+            lw=1.3,
+            markersize=4,
+            alpha=0.85,
+            label=model,
+        )
         for _, r in sub[sub["control"] == "random"].iterrows():
             rand_by_c.setdefault(r["coeff"], []).append(r["refuse_rate"])
     cs = sorted(rand_by_c)
@@ -180,6 +200,102 @@ def hero_read_write(
     axr.set_title("Turning refusal")
     axr.grid(axis="y")
     axr.legend(loc="lower right", framealpha=0.9, frameon=True, edgecolor="none")
+    return _save(fig, path)
+
+
+# --------------------------------------------------------------------------
+# Figure 1 (hero) -- one direction reads and writes refusal, on one axis
+# --------------------------------------------------------------------------
+def hero_refusal_curve(
+    graded: pd.DataFrame, benign_proj: pd.DataFrame, dial_real: pd.DataFrame, path: Path
+) -> Path:
+    """Refusal vs. position on the refusal direction, by two routes onto one axis.
+
+    Natural graded prompts sit at their measured projection (the *read*: position
+    predicts refusal). Steered benign prompts sit at ``u0 + coeff*||raw||`` -- their
+    read-layer position once the dial pushes them along the direction (the *write*).
+    Each model is standardised onto a shared axis (centred on its Youden threshold,
+    scaled by its graded-projection SD), so x=0 is the monitor threshold for every
+    model and the two routes can be pooled and compared.
+    """
+    _apply_style()
+    fig, ax = plt.subplots(figsize=(7.4, 5.4))
+
+    nat_parts, st_parts = [], []
+    for model, g in graded.groupby("model"):
+        u = g["projection"].to_numpy(float)
+        ref = g["refused"].to_numpy(bool)
+        tau = youden_threshold(u, ref)
+        sd = float(u.std()) + 1e-9
+        nat_parts.append(pd.DataFrame({"x": (u - tau) / sd, "refused": ref}))
+        bm = benign_proj[benign_proj["model"] == model][["prompt", "u0", "rawnorm"]]
+        sub = dial_real[dial_real["model"] == model].merge(bm, on="prompt", how="inner")
+        if len(sub):
+            x = (sub["u0"] + sub["coeff"] * sub["rawnorm"] - tau) / sd
+            st_parts.append(
+                pd.DataFrame({"x": x.to_numpy(), "refused": sub["refused"].to_numpy(bool)})
+            )
+    nat = pd.concat(nat_parts, ignore_index=True)
+    st = pd.concat(st_parts, ignore_index=True)
+
+    edges = np.arange(-2.5, 3.5001, 0.5)
+
+    def binned(df: pd.DataFrame, min_n: int = 8):
+        mid, pt, lo, hi = [], [], [], []
+        for i in range(len(edges) - 1):
+            m = (df["x"] >= edges[i]) & (df["x"] < edges[i + 1])
+            k = int(m.sum())
+            if k < min_n:
+                continue
+            ci = wilson_ci(int(df.loc[m, "refused"].sum()), k)
+            mid.append((edges[i] + edges[i + 1]) / 2)
+            pt.append(ci.point)
+            lo.append(ci.lo)
+            hi.append(ci.hi)
+        return np.array(mid), np.array(pt), np.array(lo), np.array(hi)
+
+    ax.axvline(0, color="#333", ls="--", lw=1.2, zorder=1)
+    ax.annotate(
+        "monitor\nthreshold",
+        (0, 1.0),
+        xytext=(7, -2),
+        textcoords="offset points",
+        fontsize=8,
+        color="#333",
+        va="top",
+    )
+
+    mx, my, mlo, mhi = binned(nat)
+    ax.fill_between(mx, mlo, mhi, color=_OKABE["sky"], alpha=0.18, zorder=2)
+    ax.plot(
+        mx,
+        my,
+        "o-",
+        color=_OKABE["blue"],
+        lw=2.0,
+        markersize=6,
+        label="natural prompts (read)",
+        zorder=4,
+    )
+    sx, sy, _, _ = binned(st)
+    ax.plot(
+        sx,
+        sy,
+        "s--",
+        color=_OKABE["vermillion"],
+        lw=1.8,
+        markersize=6,
+        label="steered benign prompts (write)",
+        zorder=3,
+    )
+
+    ax.set_ylim(-0.02, 1.04)
+    ax.set_xlim(edges[0], edges[-1])
+    ax.set_xlabel("position along the refusal direction (0 = monitor threshold)")
+    ax.set_ylabel("probability of refusing")
+    ax.set_title("One direction reads and writes refusal")
+    ax.grid(axis="y")
+    ax.legend(loc="lower right")
     return _save(fig, path)
 
 
@@ -335,7 +451,7 @@ def calibration_frontier(pooled_intent_tbl: pd.DataFrame, path: Path) -> Path:
     lim = min(1.0, lim * 1.15)
     ax.plot([0, lim], [0, lim], ls="--", color="#bbb", lw=1, zorder=0)
     ax.annotate(
-        "equal-error",
+        "equal error",
         (lim, lim),
         textcoords="offset points",
         xytext=(-4, -12),
@@ -347,7 +463,7 @@ def calibration_frontier(pooled_intent_tbl: pd.DataFrame, path: Path) -> Path:
     ax.set_ylim(-0.01, lim)
     ax.set_xlabel("over-refusal: refuse rate on L0 legitimate requests")
     ax.set_ylabel("under-refusal: comply rate on L4 disallowed requests")
-    ax.set_title("The calibration frontier (intent-relative)")
+    ax.set_title("Two kinds of mistake")
     ax.grid(True)
     return _save(fig, path)
 
@@ -382,9 +498,9 @@ def misinformation_breakdown(
         axl.fill_between(levels, los, his, color=sg_color[sg], alpha=0.12)
     axl.set_ylim(0, 1)
     axl.set_xticks(levels, [f"L{lv}" for lv in levels])
-    axl.set_xlabel("severity level (L0 legitimate $\\rightarrow$ L4 disallowed)")
-    axl.set_ylabel("refusal rate (all-model avg)")
-    axl.set_title("Behavior ramp: healthy vs. broken safeguard")
+    axl.set_xlabel("intent level (L0 legitimate to L4 disallowed)")
+    axl.set_ylabel("refusal rate (average over models)")
+    axl.set_title("Refusal by intent level")
     axl.grid(axis="y")
     axl.legend(loc="upper left")
 
@@ -404,10 +520,20 @@ def misinformation_breakdown(
                 markersize=7,
             )
     axr.axhline(0.5, color="#999", lw=1, ls="--")
-    axr.set_xticks(range(len(sgs)), sgs, rotation=20, ha="right")
+    axr.annotate(
+        "chance",
+        (len(sgs) - 1, 0.5),
+        xytext=(0, 4),
+        textcoords="offset points",
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="#999",
+    )
+    axr.set_xticks(range(len(sgs)), [s.replace("_", " ") for s in sgs], rotation=20, ha="right")
     axr.set_ylim(0.45, 1.02)
     axr.set_ylabel("within-topic AUC")
-    axr.set_title("Read quality by safeguard (0.5 = chance)")
+    axr.set_title("Read quality by domain")
     axr.grid(axis="y")
     return _save(fig, path)
 
@@ -630,10 +756,14 @@ def make_all() -> list[Path]:
     pooled_intent_tbl = _load("intent_calibration_pooled")
     dial_tbl = _load("dial")
     graded = _graded()
+    bp_path = config.RESULTS_DIR / "metrics" / "benign_proj.parquet"
+    fig1_path = config.FIGURES_DIR / "fig1_hero_read_write.png"
+    if bp_path.exists():
+        fig1 = hero_refusal_curve(graded, pd.read_parquet(bp_path), _dial_real(), fig1_path)
+    else:  # fall back to the two-panel hero if benign projections weren't captured
+        fig1 = hero_read_write(graded, pooled_tbl, dial_tbl, fig1_path)
     return [
-        hero_read_write(
-            graded, pooled_tbl, dial_tbl, config.FIGURES_DIR / "fig1_hero_read_write.png"
-        ),
+        fig1,
         graded_ramp(graded, config.FIGURES_DIR / "fig2_graded_ramp.png"),
         calibration_gap(monitor_tbl, config.FIGURES_DIR / "fig3_calibration_gap.png"),
         calibration_frontier(
