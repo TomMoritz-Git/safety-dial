@@ -495,6 +495,49 @@ def label_composition(graded: pd.DataFrame, path: Path) -> Path:
     return _save(fig, path)
 
 
+def truncation_comparison(old_graded: pd.DataFrame, new_graded: pd.DataFrame, path: Path) -> Path:
+    """Supplementary: the ``partial`` label is mostly a 64-token truncation artifact.
+
+    Left: fraction labelled ``partial`` by level, original 64-token run vs. the
+    re-judged 10240-token run — it collapses (L0 68%->6%), so the apparent
+    "hedging on benign requests" was largely answers cut off mid-sentence. Right:
+    refusal rate by level barely moves, i.e. the binary refuse/comply split that
+    the headline metrics use is robust to the cap.
+    """
+    _apply_style()
+    levels = sorted(set(old_graded["level"]) | set(new_graded["level"]))
+
+    def by_level(df, fn):
+        return [fn(df[df["level"] == lv]) for lv in levels]
+
+    p_old = by_level(old_graded, lambda s: (s["label"] == "partial").mean())
+    p_new = by_level(new_graded, lambda s: (s["label"] == "partial").mean())
+    r_old = by_level(old_graded, lambda s: s["refused"].mean())
+    r_new = by_level(new_graded, lambda s: s["refused"].mean())
+
+    fig, (axl, axr) = plt.subplots(1, 2, figsize=(11.5, 4.4))
+    x = np.arange(len(levels))
+    w = 0.38
+    axl.bar(x - w / 2, p_old, w, color="#bbb", label="64 tok (original)")
+    axl.bar(x + w / 2, p_new, w, color=_OKABE["yellow"], label="10240 tok (un-truncated)")
+    axl.set_title("`partial` label collapses without truncation")
+    axl.set_ylabel("fraction labelled partial")
+    for ax, lo in ((axl, "upper right"),):
+        ax.set_xticks(x, [f"L{lv}" for lv in levels])
+        ax.legend(loc=lo)
+    axl.set_xlabel("severity level")
+
+    axr.bar(x - w / 2, r_old, w, color="#bbb", label="64 tok")
+    axr.bar(x + w / 2, r_new, w, color=_OKABE["vermillion"], label="10240 tok")
+    axr.set_title("Refusal rate is stable (binary metric is robust)")
+    axr.set_ylabel("refusal rate")
+    axr.set_xticks(x, [f"L{lv}" for lv in levels])
+    axr.set_xlabel("severity level")
+    axr.set_ylim(0, 1)
+    axr.legend(loc="upper left")
+    return _save(fig, path)
+
+
 def anchor_robustness(robust_tbl: pd.DataFrame, nsweep_tbl: pd.DataFrame, path: Path) -> Path:
     """Supplementary: the read does not hinge on the 8 deployed anchors.
 

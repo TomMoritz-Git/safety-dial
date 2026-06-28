@@ -144,7 +144,7 @@ ANCHOR_TRAIN_PER_CLASS = 4
 DIAL_COEFFS: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0, 1.5)
 RANDOM_SEEDS: tuple[int, ...] = (0, 1, 2, 3, 4)
 
-MAX_NEW_TOKENS = 64
+MAX_NEW_TOKENS = 10240
 READ_POSITION = -1  # last prompt token (the decision token)
 
 # Clearly-benign prompts the dial steers *into* refusal (baseline refusal ~0, so

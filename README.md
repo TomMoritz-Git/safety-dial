@@ -59,11 +59,21 @@ norm-matched-random gap within the operating band (write), and the intent-relati
 over-/under-refusal frontier (calibration). Everything else — per-safeguard AUC
 cells, the severity ramps, the threshold-residual gap — is exploratory and read
 descriptively, not as a tested claim. The judge's three-way label is kept (not
-just the refuse/comply binarization): the `partial` mass (`label_mix`,
-`figures/supp_label_composition.png`) sits at the *legitimate* L0/L1 levels — these
-small models half-answer benign asks far more than they refuse them — rather than
-at the mid-ladder boundary, and thins to nothing by L3/L4. Some of that L0 partial
-is plausibly the 64-token generation cap (`MAX_NEW_TOKENS`) truncating real help.
+just the refuse/comply binarization): in the original 64-token run the `partial`
+mass (`label_mix`) sat at the *legitimate* L0/L1 levels and looked like the models
+half-answering benign asks.
+
+**Truncation control.** That `partial` mass turned out to be mostly an artifact of
+the 64-token generation cap. Regenerating the graded responses at
+`MAX_NEW_TOKENS=10240` (`regen.py`, GPU forward pass; dial untouched, since steering
+induces refusal early) and re-judging collapses `partial` at L0 from **68% → 6%** —
+the truncated answers were genuine, complete help cut off mid-sentence. Critically,
+the **binary refuse/comply metrics are robust** to the cap: within-topic AUC moves
+≤0.013 and per-level refusal rates move ≤5 points, so the read result and the intent
+frontier stand (the un-truncated numbers show marginally *more* under-refusal, since
+cut-off compliance with disallowed requests was previously mislabeled `partial`).
+See `figures/supp_truncation_comparison.png` and
+`results/metrics/truncation_comparison.parquet`.
 
 **Robustness — the direction isn't an artifact of 8 prompts.** The deployed
 direction is a diff-of-means over 8 anchors per class. To show the read doesn't
@@ -105,6 +115,7 @@ src/safety_dial/      # the package
   intent.py           # blind request-intent rater (validates the ladder's levels)
   metrics.py          # results tables: monitor AUC, intent calibration, label mix, ramps, dial
   robustness.py       # anchor-pool capture + bootstrap / N-sweep / cosine stability
+  regen.py            # regenerate graded responses at a larger token cap (truncation control)
   figures.py          # hero read<->write, ramps, calibration frontier, misinfo breakdown
   pipeline.py         # resumable orchestration
   cli.py              # `safety-dial <stage>`
