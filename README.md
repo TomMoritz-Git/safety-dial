@@ -34,7 +34,7 @@ domains, with the boundary where that picture breaks made explicit.
   HuggingFace, IBM). 4 safeguard domains — privacy, cyber-access, fraud,
   misinformation — each an *intent ladder*: 20 scenarios escalated over 5 severity
   levels (L0 legitimate → L4 disallowed), 400 graded prompts in all. A
-  topic-disjoint benign/harmful **anchor** set defines the direction; a 40-item
+  topic-disjoint benign/harmful **anchor** set defines the direction; a 55-item
   human-labeled **gold** set validates the judge.
 - **Direction.** Difference of mean harmful vs. benign anchor activations at the
   last prompt token; the layer is chosen on a held-out anchor split.
