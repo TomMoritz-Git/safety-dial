@@ -22,6 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 
 from . import config  # noqa: E402
 from .monitor import youden_threshold  # noqa: E402
@@ -48,6 +49,15 @@ MODEL_COLORS = {
     "granite3.1-2b": _OKABE["yellow"],
     "qwen2.5-1.5b": _OKABE["purple"],
     "llama3.2-1b": _OKABE["vermillion"],
+}
+# Display labels for legends (Title Case, matching the write-up).
+MODEL_LABELS = {
+    "qwen3-1.7b": "Qwen3-1.7B",
+    "gemma3-1b": "Gemma-3-1B",
+    "smollm3-3b": "SmolLM3-3B",
+    "granite3.1-2b": "Granite-3.1-2B",
+    "qwen2.5-1.5b": "Qwen2.5-1.5B",
+    "llama3.2-1b": "Llama-3.2-1B",
 }
 _OVER_COLOR = _OKABE["orange"]
 _UNDER_COLOR = _OKABE["blue"]
@@ -506,6 +516,7 @@ def misinformation_breakdown(
 
     # Right: within-topic AUC per safeguard, one marker per model.
     sgs = [s for s in config.SAFEGUARDS if s in set(monitor_tbl["safeguard"])]
+    plotted: list[str] = []
     for xi, sg in enumerate(sgs):
         cells = monitor_tbl[monitor_tbl["safeguard"] == sg]
         for _, r in cells.iterrows():
@@ -519,6 +530,8 @@ def misinformation_breakdown(
                 color=MODEL_COLORS.get(r["model"], "#666"),
                 markersize=7,
             )
+            if r["model"] not in plotted:
+                plotted.append(r["model"])
     axr.axhline(0.5, color="#999", lw=1, ls="--")
     axr.annotate(
         "chance",
@@ -535,6 +548,26 @@ def misinformation_breakdown(
     axr.set_ylabel("within-topic AUC")
     axr.set_title("Read quality by domain")
     axr.grid(axis="y")
+    # One marker per model, so a legend is needed to read the colors.
+    handles = [
+        Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            markersize=7,
+            color=MODEL_COLORS.get(m, "#666"),
+            label=MODEL_LABELS.get(m, m),
+        )
+        for m in _models(set(plotted))
+    ]
+    axr.legend(
+        handles=handles,
+        loc="lower left",
+        bbox_to_anchor=(0.0, 0.12),
+        fontsize=8,
+        handletextpad=0.2,
+    )
     return _save(fig, path)
 
 
